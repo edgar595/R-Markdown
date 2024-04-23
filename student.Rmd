@@ -1,0 +1,159 @@
+---
+title: "school"
+author: "edgar M"
+date: "2023-12-19"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+
+```{r}
+library(tidyverse)
+library(dplyr)
+library(tidymodels)
+```
+
+
+```{r}
+tuition_cost <- readr::read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-03-10/tuition_cost.csv")
+
+diversity_raw <- readr::read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-03-10/diversity_school.csv")
+
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+school_diversity <- diversity_raw %>%
+ filter(category == "Total Minority")%>%
+    mutate(Proportion = enrollment/ total_enrollment)
+```
+
+```{r}
+university_df <- school_diversity %>%
+  transmute(diversity = case_when(Proportion > 0.30 ~ "High",
+                                  TRUE ~ "low"),
+            state, name, total_enrollment) %>%
+  inner_join(tuition_cost %>%
+              select(name, type,degree_length, in_state_tuition,
+                      out_of_state_total)) %>%
+  left_join(tibble(state = state.name, region = state.region)) %>%
+  select(-name, -state) %>%
+  mutate_if(is.character, factor)
+```
+
+
+
+```{r}
+university_df %>%
+  ggplot(aes(type, in_state_tuition, fill = diversity)) +
+  geom_boxplot()
+```
+
+
+```{r}
+#Training and Testing
+uni_split <- university_df %>%
+  initial_split(strata = diversity)
+
+uni_train <- training(uni_split)
+uni_test <- testing(uni_split)
+
+#Recipe
+uni_rec <- recipe(diversity ~ ., data = uni_train) %>%
+  step_corr(all_numeric()) %>%
+  step_dummy(all_nominal(), -all_outcomes()) %>%
+  step_zv(all_numeric()) %>%
+  step_normalize(all_numeric()) %>%
+  prep()
+```
+
+```{r}
+#logistic regression, KNN and decision tree
+glm_spec <- logistic_reg() %>%
+  set_engine("glm")
+
+glm_fit <- glm_spec %>%
+  fit(diversity ~ ., data = juice(uni_rec))
+
+knn_spec <- nearest_neighbor() %>%
+  set_engine("kknn") %>%
+  set_mode("classification")
+
+knn_fit <- knn_spec %>%
+  fit(diversity ~ ., data = juice(uni_rec))
+
+tree_spec <- decision_tree() %>%
+  set_engine("rpart") %>%
+  set_mode("classification")
+
+tree_fit <- tree_spec %>%
+  fit(diversity ~ ., data = juice(uni_rec))
+
+glm_fit
+knn_fit
+tree_fit
+```
+
+```{r}
+#evaluating
+set.seed(123)
+folds <- vfold_cv(uni_train, strata = diversity)
+
+set.seed(234)
+glm_res <-  
+  fit_resamples(
+    glm_spec,
+    uni_rec,
+    folds,
+    metrics = metric_set(roc_auc, sens, spec),
+    control = control_resamples(save_pred = TRUE)
+  )
+
+set.seed(234)
+knn_res <-  
+  fit_resamples(
+    knn_spec,
+    uni_rec,
+    folds,
+    metrics = metric_set(roc_auc, sens, spec),
+    control = control_resamples(save_pred = TRUE)
+  )
+
+set.seed(234)
+tree_res <-  
+  fit_resamples(
+    tree_spec,
+    uni_rec,
+    folds,
+    metrics = metric_set(roc_auc, sens, spec),
+    control = control_resamples(save_pred = TRUE)
+  )
+
+tree_res %>%
+  collect_metrics()
+
+knn_res %>% 
+  collect_metrics()
+
+glm_res %>% 
+  collect_metrics()
+```
+
+
+
+
+
+
+
+
+
+
+

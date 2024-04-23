@@ -1,0 +1,83 @@
+---
+title: "crop production"
+author: "edgar M"
+date: "2023-12-21"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r}
+key_crop_yields
+land_use
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r}
+top_populations <- land_use %>%
+  janitor::clean_names() %>%
+  filter(!is.na(code),
+         entity != "World") %>%
+  filter(year == max(year)) %>%
+  slice_max(total_population_gapminder, n = 30) %>%
+  pull(entity)
+```
+```{r}
+tidy_yield <- key_crop_yields %>%
+  janitor::clean_names() %>%
+  pivot_longer(wheat_tonnes_per_hectare:bananas_tonnes_per_hectare,
+               names_to = "crop", values_to = "yield") %>%
+  mutate(crop = str_remove(crop, "_tonnes_per_hectare")) %>%
+  filter(crop %in% c("wheat", "rice", "maize", "barley"),
+         entity %in% top_countries,
+         !is.na(yield))
+```
+
+```{r}
+tidy_yield %>%
+    ggplot(aes(yield, year, color = crop)) +
+    geom_line(show.legend = FALSE) +
+    facet_wrap(~entity)
+```
+
+
+```{r}
+tidy_lm <- tidy_yield %>%
+  nest(yields = c("year", "yield")) %>%
+  mutate(model = map(yields, ~ lm(yield ~ year, data = .x)))
+
+tidy_lm
+  
+```
+
+```{r}
+slopes <- tidy_lm %>%
+  mutate(coefs =map(model, tidy)) %>%
+  unnest(coefs) %>%
+  filter(term == "year") %>%
+  mutate(p.value = p.adjust(p.value))
+```
+
+
+
+```{r}
+slopes %>%
+  ggplot(aes(estimate, p.value, color =crop)) +
+  geom_vline(xintercept = 0) +
+  geom_point(show.legend = FALSE) +
+  scale_y_log10() +
+  geom_text_repel(aes(label = paste(entity)), size = 3) +
+  facet_wrap(~crop)
+```
+
+
+
+
+
